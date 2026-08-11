@@ -1,0 +1,12 @@
+Flask
+Flask-RESTful
+Flask-SQLAlchemy
+psycopg2-binary
+flask-jwt-extended
+flask-cors
+bcrypt
+celery
+redis
+python-dotenv
+requests
+xhtml2pdf

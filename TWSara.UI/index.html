@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaraHive</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap"
+      rel="stylesheet"
+    >
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"Open Sans"', 'sans-serif'],
+            },
+            colors: {
+              brand: {
+                50: '#FBF2EA',
+                100: '#F4DCC4',
+                200: '#E9BA92',
+                300: '#DB9761',
+                400: '#C97D3F',
+                500: '#B5672A',
+                600: '#9C5720',
+                700: '#7D4419',
+                800: '#5E3313',
+                900: '#40230D',
+              },
+              ink: {
+                50: '#EEF2F4',
+                100: '#D3DCE1',
+                500: '#445766',
+                700: '#223642',
+                800: '#16262F',
+                900: '#0D1F28',
+              },
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      body { font-family: 'Open Sans', sans-serif; }
+    </style>
+  </head>
+  <body class="bg-slate-50">
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
