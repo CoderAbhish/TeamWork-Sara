@@ -1,4 +1,5 @@
 from flask import request
+from flask_jwt_extended import jwt_required
 from flask_restful import Resource
 
 from auth import current_user, role_required
@@ -27,6 +28,23 @@ class TeamMemberListResource(Resource):
             UserSara.query.filter_by(isAdmin=False).order_by(UserSara.username).all()
         )
         return {'items': [_team_member_payload(m) for m in members]}
+
+
+class TeamMemberOptionsResource(Resource):
+    """A minimal, non-admin-only peer list — just enough for a team member to
+    pick a transfer target, without exposing the full admin management view."""
+
+    method_decorators = [jwt_required()]
+
+    def get(self):
+        me = current_user()
+        members = (
+            UserSara.query.filter_by(isAdmin=False, isActive=True, isApproved=True)
+            .filter(UserSara.recordId != me.recordId)
+            .order_by(UserSara.username)
+            .all()
+        )
+        return {'items': [{'recordId': m.recordId, 'username': m.username} for m in members]}
 
 
 class TeamMemberResource(Resource):

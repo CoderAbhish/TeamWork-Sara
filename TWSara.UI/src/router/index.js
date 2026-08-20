@@ -52,9 +52,20 @@ const routes = [
     props: true,
   },
   {
+    path: '/projects/:id',
+    name: 'project-detail',
+    component: () => import('@/views/ProjectDetail.vue'),
+    props: true,
+  },
+  {
     path: '/suggestions',
     name: 'suggestions',
     component: () => import('@/views/Suggestions.vue'),
+  },
+  {
+    path: '/transfers',
+    name: 'transfers',
+    component: () => import('@/views/LeadTransfers.vue'),
   },
   {
     path: '/team-members',

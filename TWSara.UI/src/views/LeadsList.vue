@@ -9,7 +9,7 @@ import { useAuth } from '@/stores/auth'
 import { listLeads, createLead, assignLeads, importLeadsCsv, downloadLeadsCsv } from '@/api/leads'
 import { listBuilders, listProjects } from '@/api/builders'
 import { listTeamMembers } from '@/api/teamMembers'
-import { getLeadStatuses, getLeadCategories } from '@/api/lookups'
+import { getLeadStatuses, getLeadCategories, getLeadSources } from '@/api/lookups'
 import { statusColor, categoryColor } from '@/lib/badges'
 
 const { role } = useAuth()
@@ -24,12 +24,15 @@ const statuses = ref([])
 const categories = ref([])
 const builders = ref([])
 const teamMembers = ref([])
+const leadSources = ref([])
 
 const search = ref('')
 const statusId = ref('')
 const categoryId = ref('')
 const builderId = ref('')
 const assignedToUserId = ref('')
+const leadSourceId = ref('')
+const followUpDue = ref(false)
 const sortBy = ref('createdOn')
 const sortDir = ref('desc')
 const page = ref(1)
@@ -47,6 +50,7 @@ const createForm = ref({
 const createProjects = ref([])
 const creating = ref(false)
 const createError = ref('')
+const createNotice = ref('')
 
 const importInput = ref(null)
 const importResult = ref(null)
@@ -60,6 +64,7 @@ const columns = computed(() => {
     { key: 'project', label: 'Project' },
     { key: 'status', label: 'Status', sortable: true },
     { key: 'category', label: 'Category' },
+    { key: 'nextFollowUpOn', label: 'Follow-up', sortable: true },
     ...(isAdmin.value ? [{ key: 'assignedTo', label: 'Assigned to' }] : []),
     { key: 'createdOn', label: 'Created', sortable: true },
   ]
@@ -73,6 +78,8 @@ function currentFilterParams() {
   if (categoryId.value) params.category = categoryId.value
   if (builderId.value) params.builderId = builderId.value
   if (isAdmin.value && assignedToUserId.value) params.assignedToUserId = assignedToUserId.value
+  if (leadSourceId.value) params.leadSourceId = leadSourceId.value
+  if (followUpDue.value) params.followUpDue = true
   return params
 }
 
@@ -86,10 +93,13 @@ async function loadLeads() {
 }
 
 async function loadFilters() {
-  const [s, c, b] = await Promise.all([getLeadStatuses(), getLeadCategories(), listBuilders()])
+  const [s, c, b, src] = await Promise.all([
+    getLeadStatuses(), getLeadCategories(), listBuilders(), getLeadSources(),
+  ])
   statuses.value = s
   categories.value = c
   builders.value = b
+  leadSources.value = src
   if (isAdmin.value) teamMembers.value = await listTeamMembers()
 }
 
@@ -140,7 +150,7 @@ async function onCreateLead() {
   }
   creating.value = true
   try {
-    await createLead({
+    const result = await createLead({
       leadName: f.leadName.trim(),
       contactNumber: f.contactNumber.trim(),
       alternateNumber: f.alternateNumber.trim() || undefined,
@@ -150,6 +160,9 @@ async function onCreateLead() {
     })
     showCreateModal.value = false
     createForm.value = { leadName: '', contactNumber: '', alternateNumber: '', leadLocation: '', builderId: '', projectId: '', assignedToUserId: '' }
+    createNotice.value = result.customerReused
+      ? 'This contact already had other lead(s) — a new project lead was added for them.'
+      : ''
     await loadLeads()
   } catch (err) {
     createError.value = err.response?.data?.error || 'Could not create lead.'
@@ -228,6 +241,14 @@ onMounted(async () => {
       <button @click="importResult = null" class="text-emerald-600 hover:text-emerald-800 text-xs font-medium">Dismiss</button>
     </div>
 
+    <div
+      v-if="createNotice"
+      class="mb-4 px-4 py-3 rounded-md bg-sky-50 border border-sky-200 text-sm text-sky-800 flex justify-between items-start"
+    >
+      <p>{{ createNotice }}</p>
+      <button @click="createNotice = ''" class="text-sky-600 hover:text-sky-800 text-xs font-medium">Dismiss</button>
+    </div>
+
     <div class="bg-white rounded-lg border border-slate-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
       <div>
         <label class="block text-xs font-medium text-slate-500 mb-1">Search</label>
@@ -257,6 +278,13 @@ onMounted(async () => {
           <option v-for="b in builders" :key="b.recordId" :value="b.recordId">{{ b.builderName }}</option>
         </select>
       </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Source</label>
+        <select v-model="leadSourceId" @change="onFilterChange" class="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+          <option value="">All</option>
+          <option v-for="s in leadSources" :key="s.recordId" :value="s.recordId">{{ s.recordName }}</option>
+        </select>
+      </div>
       <div v-if="isAdmin">
         <label class="block text-xs font-medium text-slate-500 mb-1">Assigned to</label>
         <select v-model="assignedToUserId" @change="onFilterChange" class="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
@@ -264,6 +292,10 @@ onMounted(async () => {
           <option v-for="m in teamMembers" :key="m.recordId" :value="m.recordId">{{ m.username }}</option>
         </select>
       </div>
+      <label class="flex items-center gap-2 text-sm text-slate-600 pb-1.5">
+        <input type="checkbox" v-model="followUpDue" @change="onFilterChange" class="rounded border-slate-300" />
+        Follow-up due
+      </label>
       <button @click="onFilterChange" class="px-3 py-1.5 rounded-md bg-ink-900 hover:bg-ink-800 text-white text-sm font-medium">
         Apply
       </button>
@@ -318,6 +350,12 @@ onMounted(async () => {
       <template #cell-category="{ row }">
         <Badge v-if="row.leadCategoryName" :label="row.leadCategoryName" :color="categoryColor(row.leadCategoryName)" />
         <span v-else class="text-slate-300 text-xs">—</span>
+      </template>
+      <template #cell-nextFollowUpOn="{ row }">
+        <span v-if="!row.nextFollowUpOn" class="text-slate-300 text-xs">—</span>
+        <span v-else :class="new Date(row.nextFollowUpOn) < new Date() ? 'text-rose-600 font-medium' : 'text-slate-700'">
+          {{ new Date(row.nextFollowUpOn).toLocaleString() }}
+        </span>
       </template>
       <template #cell-assignedTo="{ row }">{{ row.assignedToUsername || '—' }}</template>
       <template #cell-createdOn="{ row }">{{ fmtDate(row.createdOn) }}</template>

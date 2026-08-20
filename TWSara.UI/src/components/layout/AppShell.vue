@@ -13,6 +13,7 @@ const navItems = [
   { to: '/dashboard', label: 'Dashboard', adminOnly: false },
   { to: '/leads', label: 'Leads', adminOnly: false },
   { to: '/suggestions', label: 'Suggestions', adminOnly: false },
+  { to: '/transfers', label: 'Transfers', adminOnly: false },
   { to: '/builders', label: 'Builders', adminOnly: false },
   { to: '/team-members', label: 'Team', adminOnly: true },
 ]

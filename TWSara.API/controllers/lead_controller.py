@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from flask import request
 from flask_jwt_extended import jwt_required
 from flask_restful import Resource
@@ -10,7 +12,9 @@ from models import (
     CustProject,
     LeadComment,
     LookupLeadCategory,
+    LookupLeadSource,
     LookupLeadStatus,
+    ProjectUnitConfiguration,
     UserSara,
     utcnow,
 )
@@ -21,7 +25,22 @@ SORT_COLUMNS = {
     'leadLocation': CustLeadPrimary.leadLocation,
     'status': LookupLeadStatus.recordName,
     'category': LookupLeadCategory.recordName,
+    'nextFollowUpOn': CustProject.nextFollowUpOn,
 }
+
+
+def _related_leads_payload(lead):
+    return [
+        {
+            'recordId': sibling.recordId,
+            'projectName': sibling.project.projectName if sibling.project else None,
+            'builderName': sibling.project.builder.builderName if sibling.project else None,
+            'statusName': sibling.status.recordName if sibling.status else None,
+            'assignedToUsername': sibling.assignedTo.username if sibling.assignedTo else None,
+        }
+        for sibling in lead.customer.leads
+        if sibling.recordId != lead.recordId
+    ]
 
 
 def _lead_payload(lead):
@@ -40,17 +59,32 @@ def _lead_payload(lead):
                 'projectName': lead.project.projectName,
                 'builderRecordId': lead.project.builderRecordId,
                 'builderName': lead.project.builder.builderName,
+                'configurations': [
+                    {'recordId': c.recordId, 'configurationLabel': c.configurationLabel}
+                    for c in lead.project.configurations
+                ],
             }
             if lead.project
             else None
         ),
         'isCustLeadRegistered': lead.isCustLeadRegistered,
+        'registeredOn': lead.registeredOn.isoformat() if lead.registeredOn else None,
+        'registrationExpiryDate': (
+            lead.registrationExpiryDate.isoformat() if lead.registrationExpiryDate else None
+        ),
         'assignedToUserId': lead.assignedToUserId,
         'assignedToUsername': lead.assignedTo.username if lead.assignedTo else None,
         'leadStatusId': lead.leadStatusId,
         'leadStatusName': lead.status.recordName if lead.status else None,
         'leadCategoryId': lead.leadCategoryId,
         'leadCategoryName': lead.category.recordName if lead.category else None,
+        'leadSourceId': lead.leadSourceId,
+        'leadSourceName': lead.source.recordName if lead.source else None,
+        'leadSourceDetail': lead.leadSourceDetail,
+        'nextFollowUpOn': lead.nextFollowUpOn.isoformat() if lead.nextFollowUpOn else None,
+        'interestedConfigId': lead.interestedConfigId,
+        'interestedConfigLabel': lead.interestedConfig.configurationLabel if lead.interestedConfig else None,
+        'relatedLeads': _related_leads_payload(lead),
         'createdOn': lead.createdOn.isoformat() if lead.createdOn else None,
         'convertedOn': lead.convertedOn.isoformat() if lead.convertedOn else None,
     }
@@ -63,6 +97,24 @@ def _apply_lead_status(lead, status_id):
         status = LookupLeadStatus.query.get(status_id)
         if status and status.recordName == 'Converted' and lead.convertedOn is None:
             lead.convertedOn = utcnow()
+
+
+def _apply_registration(lead, is_registered, explicit_expiry='__unset__'):
+    """Set isCustLeadRegistered, stamping registeredOn the first time it flips
+    true and defaulting registrationExpiryDate from the builder's configured
+    validity window unless an explicit expiry was given."""
+    was_registered = lead.isCustLeadRegistered
+    lead.isCustLeadRegistered = is_registered
+
+    if explicit_expiry != '__unset__':
+        lead.registrationExpiryDate = explicit_expiry or None
+
+    if is_registered and not was_registered:
+        lead.registeredOn = utcnow()
+        if explicit_expiry == '__unset__' and lead.project and lead.project.builder:
+            validity_days = lead.project.builder.leadRegistrationValidityDays
+            if validity_days:
+                lead.registrationExpiryDate = utcnow() + timedelta(days=validity_days)
 
 
 def _comment_payload(comment):
@@ -92,6 +144,44 @@ def _validate_assignee(assignee_id):
     return None
 
 
+EXTRA_LEAD_FIELD_KEYS = {
+    'isCustLeadRegistered',
+    'registrationExpiryDate',
+    'leadSourceId',
+    'leadSourceDetail',
+    'nextFollowUpOn',
+    'interestedConfigId',
+}
+
+
+def _apply_extra_lead_fields(lead, data):
+    """Applies the fields both team members and admins may edit on a lead:
+    registration, lead source, next follow-up, interested configuration.
+    Returns an error string, or None on success."""
+    if 'leadSourceId' in data:
+        if data['leadSourceId'] is not None and not LookupLeadSource.query.get(data['leadSourceId']):
+            return 'invalid leadSourceId'
+        lead.leadSourceId = data['leadSourceId']
+    if 'leadSourceDetail' in data:
+        lead.leadSourceDetail = (data.get('leadSourceDetail') or '').strip() or None
+    if 'nextFollowUpOn' in data:
+        lead.nextFollowUpOn = data['nextFollowUpOn'] or None
+    if 'interestedConfigId' in data:
+        config_id = data['interestedConfigId']
+        if config_id is not None and not ProjectUnitConfiguration.query.get(config_id):
+            return 'invalid interestedConfigId'
+        lead.interestedConfigId = config_id or None
+    if 'isCustLeadRegistered' in data or 'registrationExpiryDate' in data:
+        is_registered = (
+            bool(data['isCustLeadRegistered'])
+            if 'isCustLeadRegistered' in data
+            else lead.isCustLeadRegistered
+        )
+        explicit_expiry = data['registrationExpiryDate'] if 'registrationExpiryDate' in data else '__unset__'
+        _apply_registration(lead, is_registered, explicit_expiry)
+    return None
+
+
 class LeadListResource(Resource):
     method_decorators = [jwt_required()]
 
@@ -117,6 +207,12 @@ class LeadListResource(Resource):
             query = query.filter(BuilderProject.builderRecordId == int(request.args['builderId']))
         if request.args.get('projectId'):
             query = query.filter(CustProject.projectId == int(request.args['projectId']))
+        if request.args.get('leadSourceId'):
+            query = query.filter(CustProject.leadSourceId == int(request.args['leadSourceId']))
+        if request.args.get('followUpDue', '').lower() == 'true':
+            query = query.filter(
+                CustProject.nextFollowUpOn.isnot(None), CustProject.nextFollowUpOn <= utcnow()
+            )
         if request.args.get('search'):
             like = f"%{request.args['search']}%"
             query = query.filter(
@@ -152,10 +248,12 @@ class LeadListResource(Resource):
             return {'error': 'invalid projectId'}, 400
 
         customer_id = data.get('customerId')
+        customer_reused = False
         if customer_id:
             customer = CustLeadPrimary.query.get(customer_id)
             if not customer:
                 return {'error': 'customer not found'}, 404
+            customer_reused = True
         else:
             lead_name = (data.get('leadName') or '').strip()
             contact_number = (data.get('contactNumber') or '').strip()
@@ -172,6 +270,8 @@ class LeadListResource(Resource):
                 )
                 db.session.add(customer)
                 db.session.flush()
+            else:
+                customer_reused = True
 
         assignee_error = _validate_assignee(data.get('assignedToUserId'))
         if assignee_error:
@@ -190,9 +290,12 @@ class LeadListResource(Resource):
             createdBy=current_user().recordId,
         )
         _apply_lead_status(lead, status_id)
+        extra_error = _apply_extra_lead_fields(lead, data)
+        if extra_error:
+            return {'error': extra_error}, 400
         db.session.add(lead)
         db.session.commit()
-        return {'lead': _lead_payload(lead)}, 201
+        return {'lead': _lead_payload(lead), 'customerReused': customer_reused}, 201
 
 
 class LeadResource(Resource):
@@ -213,9 +316,12 @@ class LeadResource(Resource):
         data = request.get_json(silent=True) or {}
 
         if me.role == 'teamMember':
-            allowed_keys = {'leadStatusId', 'leadCategoryId'}
+            allowed_keys = {'leadStatusId', 'leadCategoryId'} | EXTRA_LEAD_FIELD_KEYS
             if not set(data.keys()) <= allowed_keys:
-                return {'error': 'team members may only update leadStatusId/leadCategoryId'}, 403
+                return {
+                    'error': 'team members may only update status/category/registration/'
+                    'source/follow-up/interested-configuration fields'
+                }, 403
             if 'leadStatusId' in data and data['leadStatusId'] is not None:
                 if not LookupLeadStatus.query.get(data['leadStatusId']):
                     return {'error': 'invalid leadStatusId'}, 400
@@ -224,6 +330,10 @@ class LeadResource(Resource):
                 if not LookupLeadCategory.query.get(data['leadCategoryId']):
                     return {'error': 'invalid leadCategoryId'}, 400
                 lead.leadCategoryId = data['leadCategoryId']
+            extra_error = _apply_extra_lead_fields(lead, data)
+            if extra_error:
+                return {'error': extra_error}, 400
+            lead.modifiedBy = me.recordId
         else:
             customer_data = data.get('customer') or {}
             if customer_data:
@@ -249,8 +359,9 @@ class LeadResource(Resource):
                 if not LookupLeadCategory.query.get(data['leadCategoryId']):
                     return {'error': 'invalid leadCategoryId'}, 400
                 lead.leadCategoryId = data['leadCategoryId']
-            if 'isCustLeadRegistered' in data:
-                lead.isCustLeadRegistered = bool(data['isCustLeadRegistered'])
+            extra_error = _apply_extra_lead_fields(lead, data)
+            if extra_error:
+                return {'error': extra_error}, 400
             lead.modifiedBy = me.recordId
 
         db.session.commit()

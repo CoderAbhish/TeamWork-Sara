@@ -42,7 +42,15 @@ def reset_db_command():
 def seed_lookups_command():
     """Seed the lookup tables with their default option lists (idempotent)."""
     from db import db
-    from models import LookupLeadCategory, LookupLeadStatus, LookupProjectStatus
+    from models import (
+        LookupLeadCategory,
+        LookupLeadSource,
+        LookupLeadStatus,
+        LookupListingType,
+        LookupProjectStatus,
+        LookupPropertyType,
+        LookupSaleType,
+    )
 
     def seed(model, names):
         added = 0
@@ -61,7 +69,17 @@ def seed_lookups_command():
         LookupLeadStatus,
         ['New', 'Contacted', 'Site Visit Scheduled', 'Negotiation', 'Converted', 'Lost', 'On Hold'],
     )
-    added += seed(LookupLeadCategory, ['Hot', 'Warm', 'Cold'])
+    added += seed(LookupLeadCategory, ['New/Fresh', 'Warm', 'Hot', 'Cold', 'Dead'])
+    added += seed(
+        LookupPropertyType,
+        ['Individual', 'Flat/Apartment', 'Villa', 'Row House', 'Plot', 'Farm Land'],
+    )
+    added += seed(LookupSaleType, ['Resale', 'Sale', 'Rented'])
+    added += seed(
+        LookupListingType,
+        ['New Launch', 'Under Construction', 'Ready to Move', 'Existing'],
+    )
+    added += seed(LookupLeadSource, ['Syndicate', 'Meta', 'Google', 'IVR Calling', 'Other'])
 
     db.session.commit()
     print(f'Seeded lookup tables ({added} new rows).')

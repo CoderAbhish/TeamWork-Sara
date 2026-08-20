@@ -4,7 +4,9 @@ export const listLeads = (params = {}) => api.get('/leads', { params }).then((r)
 
 export const getLead = (leadId) => api.get(`/leads/${leadId}`).then((r) => r.data.lead)
 
-export const createLead = (payload) => api.post('/leads', payload).then((r) => r.data.lead)
+// Returns the full response ({ lead, customerReused }) — customerReused lets
+// the caller flag when a new lead was added under an existing contact.
+export const createLead = (payload) => api.post('/leads', payload).then((r) => r.data)
 
 export const updateLead = (leadId, patch) =>
   api.patch(`/leads/${leadId}`, patch).then((r) => r.data.lead)

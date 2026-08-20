@@ -2,6 +2,10 @@ import api from '@/lib/api'
 
 export const listTeamMembers = () => api.get('/team-members').then((r) => r.data.items)
 
+// A minimal peer list any authenticated team member can call (unlike
+// listTeamMembers, which is admin-only) — used to pick a transfer target.
+export const listTeamMemberOptions = () => api.get('/team-members/options').then((r) => r.data.items)
+
 export const getTeamMember = (userId) =>
   api.get(`/team-members/${userId}`).then((r) => r.data.teamMember)
 
