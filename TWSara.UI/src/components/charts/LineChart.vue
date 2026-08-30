@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 const props = defineProps({
   points: { type: Array, required: true }, // [{ label, count }]
@@ -9,6 +9,28 @@ const props = defineProps({
 
 const width = 640
 const padding = { top: 20, right: 20, bottom: 28, left: 16 }
+
+// The SVG already scales to its container via viewBox + w-full, but the
+// element count/label density doesn't know how much room it actually has
+// on screen — that needs a real measurement, hence ResizeObserver rather
+// than a CSS-only approach.
+const containerRef = ref(null)
+const containerWidth = ref(640)
+let resizeObserver = null
+
+onMounted(() => {
+  if (!containerRef.value) return
+  resizeObserver = new ResizeObserver((entries) => {
+    containerWidth.value = entries[0].contentRect.width
+  })
+  resizeObserver.observe(containerRef.value)
+})
+onUnmounted(() => resizeObserver?.disconnect())
+
+const compact = computed(() => containerWidth.value < 380)
+function labelFor(label) {
+  return compact.value ? label.split(' ')[0] : label
+}
 
 const maxCount = computed(() => Math.max(1, ...props.points.map((p) => p.count)))
 const chartHeight = computed(() => props.height - padding.top - padding.bottom)
@@ -54,7 +76,7 @@ function onMove(event) {
 </script>
 
 <template>
-  <div class="chart-container relative">
+  <div ref="containerRef" class="chart-container relative">
     <svg
       :viewBox="`0 0 ${width} ${height}`"
       class="w-full"
@@ -91,7 +113,7 @@ function onMove(event) {
         :text-anchor="i === 0 ? 'start' : i === coords.length - 1 ? 'end' : 'middle'"
         class="fill-slate-500 text-[11px]"
       >
-        {{ c.label }}
+        {{ labelFor(c.label) }}
       </text>
     </svg>
 

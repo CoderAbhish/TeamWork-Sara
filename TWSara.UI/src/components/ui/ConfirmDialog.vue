@@ -11,7 +11,7 @@ const emit = defineEmits(['confirm', 'cancel'])
 </script>
 
 <template>
-  <Modal :title="title" width-class="max-w-md" @close="emit('cancel')">
+  <Modal :title="title" width-class="sm:max-w-md" @close="emit('cancel')">
     <p class="text-sm text-slate-700 whitespace-pre-line">{{ message }}</p>
 
     <template #footer>

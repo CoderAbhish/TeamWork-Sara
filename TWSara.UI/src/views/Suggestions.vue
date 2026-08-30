@@ -39,12 +39,12 @@ const importing = ref(false)
 const statusColorFor = { pending: 'amber', approved: 'emerald', rejected: 'rose' }
 
 const columns = computed(() => [
-  { key: 'leadName', label: 'Name' },
-  { key: 'contactNumber', label: 'Contact' },
-  { key: 'project', label: 'Project' },
-  ...(isAdmin.value ? [{ key: 'suggestedBy', label: 'Suggested by' }] : []),
-  { key: 'status', label: 'Status' },
-  { key: 'createdOn', label: 'Created' },
+  { key: 'leadName', label: 'Name', priority: 'high' },
+  { key: 'contactNumber', label: 'Contact', priority: 'high' },
+  { key: 'project', label: 'Project', priority: 'medium' },
+  ...(isAdmin.value ? [{ key: 'suggestedBy', label: 'Suggested by', priority: 'medium' }] : []),
+  { key: 'status', label: 'Status', priority: 'high' },
+  { key: 'createdOn', label: 'Created', priority: 'low' },
   ...(isAdmin.value ? [{ key: 'actions', label: '' }] : []),
 ])
 
@@ -213,7 +213,7 @@ onMounted(async () => {
       </template>
     </DataTable>
 
-    <Modal v-if="showCreateModal" title="Suggest a Lead" width-class="max-w-lg" @close="showCreateModal = false">
+    <Modal v-if="showCreateModal" title="Suggest a Lead" width-class="sm:max-w-lg" @close="showCreateModal = false">
       <div class="grid grid-cols-2 gap-4">
         <div class="col-span-2">
           <label class="block text-sm font-medium text-slate-600 mb-1">Lead name</label>

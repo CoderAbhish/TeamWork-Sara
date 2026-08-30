@@ -16,11 +16,11 @@ const pendingMembers = computed(() => members.value.filter((m) => !m.isApproved)
 const activeMembers = computed(() => members.value.filter((m) => m.isApproved))
 
 const columns = [
-  { key: 'username', label: 'Username' },
-  { key: 'emailId', label: 'Email' },
-  { key: 'contactNumber', label: 'Contact' },
-  { key: 'assignedLeadCount', label: 'Assigned leads' },
-  { key: 'isActive', label: 'Status' },
+  { key: 'username', label: 'Username', priority: 'high' },
+  { key: 'emailId', label: 'Email', priority: 'medium' },
+  { key: 'contactNumber', label: 'Contact', priority: 'medium' },
+  { key: 'assignedLeadCount', label: 'Assigned leads', priority: 'high' },
+  { key: 'isActive', label: 'Status', priority: 'high' },
 ]
 
 const selectedMember = ref(null)
@@ -109,7 +109,7 @@ onMounted(load)
     <Modal
       v-if="selectedMember"
       :title="`${selectedMember.username}'s leads`"
-      width-class="max-w-2xl"
+      width-class="sm:max-w-2xl"
       @close="selectedMember = null"
     >
       <div v-if="memberLeadsLoading" class="text-sm text-slate-400">Loading…</div>

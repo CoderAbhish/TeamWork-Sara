@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 const props = defineProps({
   items: { type: Array, required: true }, // [{ name, count, color }]
@@ -10,6 +10,26 @@ const width = 480
 const padding = { top: 28, right: 16, bottom: 28, left: 16 }
 const barWidth = 24
 const radius = 4
+
+const containerRef = ref(null)
+const containerWidth = ref(480)
+let resizeObserver = null
+
+onMounted(() => {
+  if (!containerRef.value) return
+  resizeObserver = new ResizeObserver((entries) => {
+    containerWidth.value = entries[0].contentRect.width
+  })
+  resizeObserver.observe(containerRef.value)
+})
+onUnmounted(() => resizeObserver?.disconnect())
+
+// Below this rendered width there isn't room for a value label over every
+// bar plus a full category name without them colliding — thin both out.
+const compact = computed(() => containerWidth.value < 380)
+function labelFor(name) {
+  return compact.value && name.length > 4 ? `${name.slice(0, 3)}…` : name
+}
 
 const maxCount = computed(() => Math.max(1, ...props.items.map((i) => i.count)))
 const chartHeight = computed(() => props.height - padding.top - padding.bottom)
@@ -45,7 +65,7 @@ function onHover(bar, event) {
 </script>
 
 <template>
-  <div class="chart-container relative">
+  <div ref="containerRef" class="chart-container relative">
     <svg :viewBox="`0 0 ${width} ${height}`" class="w-full" :style="{ height: `${height}px` }">
       <line
         :x1="padding.left" :x2="width - padding.right"
@@ -62,7 +82,7 @@ function onHover(bar, event) {
           @mouseleave="hovered = null"
         />
         <text
-          v-if="bar.count > 0"
+          v-if="bar.count > 0 && (!compact || hovered?.name === bar.name)"
           :x="bar.cx" :y="bar.y - 8"
           text-anchor="middle"
           class="fill-slate-700 text-[13px] font-semibold"
@@ -74,7 +94,7 @@ function onHover(bar, event) {
           text-anchor="middle"
           class="fill-slate-500 text-[11px]"
         >
-          {{ bar.name }}
+          {{ labelFor(bar.name) }}
         </text>
       </g>
     </svg>

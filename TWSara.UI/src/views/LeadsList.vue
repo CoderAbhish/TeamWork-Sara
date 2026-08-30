@@ -85,14 +85,14 @@ const importing = ref(false)
 const columns = computed(() => {
   const cols = [
     ...(isAdmin.value ? [{ key: 'select', label: '' }] : []),
-    { key: 'leadName', label: 'Name' },
-    { key: 'contactNumber', label: 'Contact' },
-    { key: 'project', label: 'Project' },
-    { key: 'status', label: 'Status', sortable: true },
-    { key: 'category', label: 'Category' },
-    { key: 'nextFollowUpOn', label: 'Follow-up', sortable: true },
-    ...(isAdmin.value ? [{ key: 'assignedTo', label: 'Assigned to' }] : []),
-    { key: 'createdOn', label: 'Created', sortable: true },
+    { key: 'leadName', label: 'Name', priority: 'high' },
+    { key: 'contactNumber', label: 'Contact', priority: 'high' },
+    { key: 'project', label: 'Project', priority: 'medium' },
+    { key: 'status', label: 'Status', sortable: true, priority: 'high' },
+    { key: 'category', label: 'Category', priority: 'medium' },
+    { key: 'nextFollowUpOn', label: 'Follow-up', sortable: true, priority: 'medium' },
+    ...(isAdmin.value ? [{ key: 'assignedTo', label: 'Assigned to', priority: 'low' }] : []),
+    { key: 'createdOn', label: 'Created', sortable: true, priority: 'low' },
   ]
   return cols
 })
@@ -521,7 +521,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <Modal v-if="showCreateModal" title="New Lead" width-class="max-w-xl" @close="showCreateModal = false">
+    <Modal v-if="showCreateModal" title="New Lead" width-class="sm:max-w-xl" @close="showCreateModal = false">
       <div class="grid grid-cols-2 gap-4">
         <div class="col-span-2">
           <label class="block text-sm font-medium text-slate-600 mb-1">Lead name</label>

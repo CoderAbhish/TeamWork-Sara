@@ -29,11 +29,11 @@ const validityDays = ref('')
 const savingValidity = ref(false)
 
 const columns = [
-  { key: 'projectName', label: 'Project' },
-  { key: 'location', label: 'Location' },
-  { key: 'statusName', label: 'Status' },
-  { key: 'startDate', label: 'Start date' },
-  { key: 'plannedCompletionDate', label: 'Planned completion' },
+  { key: 'projectName', label: 'Project', priority: 'high' },
+  { key: 'location', label: 'Location', priority: 'high' },
+  { key: 'statusName', label: 'Status', priority: 'high' },
+  { key: 'startDate', label: 'Start date', priority: 'medium' },
+  { key: 'plannedCompletionDate', label: 'Planned completion', priority: 'low' },
 ]
 
 async function load() {

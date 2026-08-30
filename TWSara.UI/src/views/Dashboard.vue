@@ -83,7 +83,7 @@ onMounted(load)
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2 bg-white rounded-lg border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
             <p class="text-sm font-semibold text-slate-700">
               {{ role === 'admin' ? 'Leads converted' : 'My leads converted' }}
             </p>
@@ -92,7 +92,7 @@ onMounted(load)
                 v-for="p in periods"
                 :key="p.key"
                 @click="period = p.key; loadPeriodChart()"
-                class="px-3 py-1 rounded text-xs font-medium transition-colors"
+                class="tap-target px-2.5 sm:px-3 py-1 rounded text-xs font-medium transition-colors"
                 :class="period === p.key ? 'bg-white text-ink-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
               >
                 {{ p.label }}

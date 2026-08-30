@@ -32,7 +32,7 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-ink-900 px-4">
+  <div class="min-h-dvh flex items-center justify-center bg-ink-900 px-4">
     <div v-if="submitted" class="w-full max-w-sm bg-white rounded-lg shadow-xl p-8 text-center">
       <p class="text-2xl font-semibold tracking-tight text-ink-900 mb-4">
         Sara<span class="text-brand-500">Hive</span>

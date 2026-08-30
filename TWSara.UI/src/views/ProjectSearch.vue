@@ -33,13 +33,13 @@ const page = ref(1)
 const pageSize = 20
 
 const columns = [
-  { key: 'projectName', label: 'Project' },
-  { key: 'builderName', label: 'Builder' },
-  { key: 'location', label: 'Location' },
-  { key: 'propertyTypeName', label: 'Property type' },
-  { key: 'listingTypeName', label: 'Listing' },
-  { key: 'statusName', label: 'Status' },
-  { key: 'priceRange', label: 'Starting price' },
+  { key: 'projectName', label: 'Project', priority: 'high' },
+  { key: 'builderName', label: 'Builder', priority: 'high' },
+  { key: 'location', label: 'Location', priority: 'high' },
+  { key: 'propertyTypeName', label: 'Property type', priority: 'medium' },
+  { key: 'listingTypeName', label: 'Listing', priority: 'medium' },
+  { key: 'statusName', label: 'Status', priority: 'low' },
+  { key: 'priceRange', label: 'Starting price', priority: 'high' },
 ]
 
 function currentFilterParams() {

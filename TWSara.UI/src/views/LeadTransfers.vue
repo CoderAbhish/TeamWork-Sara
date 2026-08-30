@@ -20,12 +20,12 @@ const statusFilter = ref(isAdmin.value ? 'pending' : '')
 const actingOn = ref(new Set())
 
 const columns = computed(() => [
-  { key: 'leadName', label: 'Lead' },
-  { key: 'fromUsername', label: 'From' },
-  { key: 'toUsername', label: 'To' },
-  { key: 'comment', label: 'Comment' },
-  { key: 'status', label: 'Status' },
-  { key: 'requestedOn', label: 'Requested' },
+  { key: 'leadName', label: 'Lead', priority: 'high' },
+  { key: 'fromUsername', label: 'From', priority: 'high' },
+  { key: 'toUsername', label: 'To', priority: 'high' },
+  { key: 'comment', label: 'Comment', priority: 'medium' },
+  { key: 'status', label: 'Status', priority: 'high' },
+  { key: 'requestedOn', label: 'Requested', priority: 'low' },
   ...(isAdmin.value ? [{ key: 'actions', label: '' }] : []),
 ])
 

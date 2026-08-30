@@ -33,7 +33,7 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-ink-900 px-4">
+  <div class="min-h-dvh flex items-center justify-center bg-ink-900 px-4">
     <form class="w-full max-w-sm bg-white rounded-lg shadow-xl p-8" @submit.prevent="onSubmit">
       <div class="mb-6 text-center">
         <p class="text-2xl font-semibold tracking-tight text-ink-900">

@@ -12,7 +12,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50">
+  <div class="min-h-dvh bg-slate-50">
     <nav class="w-full bg-white border-b border-slate-200">
       <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
         <span class="text-xl font-semibold tracking-tight text-ink-900">

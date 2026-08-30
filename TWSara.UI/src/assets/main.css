@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* Design tokens — the single source of truth for colors, breakpoints, and
+   fonts. Previously these lived in an inline <script>tailwind.config</script>
+   block in index.html (Tailwind CDN build); this @theme block replaces
+   that now that Tailwind is a real build dependency. Every utility class
+   used across the app (bg-brand-500, text-ink-900, sm:/md:/lg: ...) is
+   generated from these variables — components should never hardcode a hex
+   color, a one-off breakpoint, or a raw px spacing value instead of using
+   the scale these tokens produce. */
+@theme {
+  --font-sans: 'Open Sans', sans-serif;
+
+  /* Compact / medium / expanded breakpoints (Material Design 3-style),
+     used consistently instead of Tailwind's stock 640/768/1024. */
+  --breakpoint-sm: 600px;
+  --breakpoint-md: 905px;
+  --breakpoint-lg: 1240px;
+
+  --color-brand-50: #FBF2EA;
+  --color-brand-100: #F4DCC4;
+  --color-brand-200: #E9BA92;
+  --color-brand-300: #DB9761;
+  --color-brand-400: #C97D3F;
+  --color-brand-500: #B5672A;
+  --color-brand-600: #9C5720;
+  --color-brand-700: #7D4419;
+  --color-brand-800: #5E3313;
+  --color-brand-900: #40230D;
+
+  --color-ink-50: #EEF2F4;
+  --color-ink-100: #D3DCE1;
+  --color-ink-500: #445766;
+  --color-ink-700: #223642;
+  --color-ink-800: #16262F;
+  --color-ink-900: #0D1F28;
+}
+
+body {
+  font-family: 'Open Sans', sans-serif;
+}
+
+/* One consistent, always-visible focus ring for every interactive element,
+   instead of relying on each component to remember to add one (item 45).
+   Tailwind v4 already scopes :hover behind @media (hover: hover) by
+   default, so hover-only affordances degrade correctly on touch without
+   extra work here (item 42). */
+a, button, input, select, textarea, [tabindex] {
+  &:focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+}
+
+/* Minimum 44x44px hit area for icon-only buttons, checkboxes, and small
+   action links (WCAG 2.5.5 / iOS & Material touch-target guidance) —
+   applied alongside a component's own sizing classes, not instead of them. */
+@utility tap-target {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+/* Fluid heading scale — replaces a single fixed font-size with one that
+   scales continuously between the phone and desktop values instead of
+   jumping at a breakpoint. */
+@utility text-hero {
+  font-size: clamp(1.75rem, 1.1rem + 2.5vw, 3rem);
+  line-height: 1.1;
+}
+
+@utility text-page-title {
+  font-size: clamp(1.125rem, 1rem + 0.5vw, 1.375rem);
+}
+
+/* prefers-reduced-motion: transitions/animations that opt in to this class
+   (nav active-state, modal/dialog entrance, chart hover) no-op instead of
+   animating when the user has asked the OS to reduce motion. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
