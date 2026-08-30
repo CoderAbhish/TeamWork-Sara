@@ -53,6 +53,7 @@ from controllers.lookup_controller import (
     SaleTypeListResource,
 )
 from controllers.misc_controller import HomeResource, PublicStatsResource
+from controllers.notification_controller import NotificationDismissResource, NotificationListResource
 from controllers.report_controller import LeadExportResource, LeadImportResource
 from controllers.site_visit_controller import (
     SiteVisitListResource,
@@ -120,6 +121,9 @@ def register_routes(app):
     api.add_resource(ConvertedOverTimeResource, '/api/analytics/converted-over-time')
     api.add_resource(LeadsByCategoryResource, '/api/analytics/leads-by-category')
     api.add_resource(HotLeadsResource, '/api/analytics/hot-leads')
+
+    api.add_resource(NotificationListResource, '/api/notifications')
+    api.add_resource(NotificationDismissResource, '/api/notifications/dismiss')
 
     api.add_resource(TeamMemberOptionsResource, '/api/team-members/options')
     api.add_resource(TeamMemberListResource, '/api/team-members')

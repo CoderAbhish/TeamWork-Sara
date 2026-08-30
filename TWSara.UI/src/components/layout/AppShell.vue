@@ -1,6 +1,7 @@
 <script setup>
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/stores/auth'
+import NotificationBell from './NotificationBell.vue'
 
 defineProps({
   title: { type: String, required: true },
@@ -56,6 +57,7 @@ function onLogout() {
         <h1 class="text-lg font-semibold text-slate-800">{{ title }}</h1>
         <div class="flex items-center gap-3">
           <slot name="actions" />
+          <NotificationBell />
           <button
             @click="onLogout"
             class="text-sm font-medium text-slate-500 hover:text-brand-600 px-3 py-1.5 rounded-md hover:bg-slate-100 transition-colors"

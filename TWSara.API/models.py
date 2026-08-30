@@ -410,3 +410,20 @@ class SiteVisit(db.Model):
     modifiedBy = db.Column(db.Integer, db.ForeignKey('user_sara.recordId'))
 
     lead = db.relationship('CustProject', back_populates='siteVisits')
+
+
+class NotificationDismissal(db.Model):
+    """Notifications aren't persisted rows — they're computed fresh from
+    current data on every request (follow-ups due, expired registrations,
+    unassigned leads, pending transfers), since there's no background
+    scheduler in this app to generate them ahead of time. This table is
+    just the "I've seen this one" marker per user + notification key, so a
+    dismissed reminder doesn't reappear on the next poll."""
+
+    __tablename__ = 'notification_dismissal'
+    __table_args__ = (db.UniqueConstraint('userId', 'notificationKey', name='uq_notification_dismissal'),)
+
+    recordId = db.Column(db.Integer, primary_key=True)
+    userId = db.Column(db.Integer, db.ForeignKey('user_sara.recordId'), nullable=False, index=True)
+    notificationKey = db.Column(db.String(255), nullable=False)
+    dismissedOn = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
