@@ -11,6 +11,7 @@ from models import (
     CustLeadPrimary,
     CustProject,
     LeadComment,
+    LeadFollowUp,
     LookupLeadCategory,
     LookupLeadSource,
     LookupLeadStatus,
@@ -99,22 +100,51 @@ def _apply_lead_status(lead, status_id):
             lead.convertedOn = utcnow()
 
 
-def _apply_registration(lead, is_registered, explicit_expiry='__unset__'):
-    """Set isCustLeadRegistered, stamping registeredOn the first time it flips
-    true and defaulting registrationExpiryDate from the builder's configured
-    validity window unless an explicit expiry was given."""
+def _status_id_by_name(name):
+    status = LookupLeadStatus.query.filter_by(recordName=name).first()
+    return status.recordId if status else None
+
+
+# The lead status only moves forward along this path, and never by a free
+# choice: New -> Contacted is a manual, commented action; Site Visit
+# Scheduled and Negotiation are set automatically (see site_visit_controller
+# — scheduling a visit / marking one Completed); Converted/On Hold/Lost are
+# manual, commented actions reachable once contact has actually happened.
+MANUAL_STATUS_TRANSITIONS = {
+    'New': ['Contacted'],
+    'Contacted': ['Lost', 'On Hold'],
+    'Site Visit Scheduled': ['Lost', 'On Hold'],
+    'Negotiation': ['Converted', 'On Hold', 'Lost'],
+}
+
+
+def _registration_block_reason(lead):
+    """Why a lead can't be registered right now, or None if it's fine.
+    The expiry date is always derived from the builder's configured
+    validity window — never entered by hand — so registration is blocked
+    until that's in place."""
+    if not lead.project or not lead.project.builder:
+        return 'This lead is not linked to a project yet. Assign a project before registering it.'
+    builder_name = lead.project.builder.builderName
+    if not lead.project.builder.leadRegistrationValidityDays:
+        return (
+            f'The lead registration validity for "{builder_name}" has not been set yet. '
+            'Please ask an admin to configure it before registering this lead.'
+        )
+    return None
+
+
+def _apply_registration(lead, is_registered):
+    """Set isCustLeadRegistered, stamping registeredOn and deriving
+    registrationExpiryDate from the builder's configured validity window
+    the first time it flips true."""
     was_registered = lead.isCustLeadRegistered
     lead.isCustLeadRegistered = is_registered
 
-    if explicit_expiry != '__unset__':
-        lead.registrationExpiryDate = explicit_expiry or None
-
     if is_registered and not was_registered:
         lead.registeredOn = utcnow()
-        if explicit_expiry == '__unset__' and lead.project and lead.project.builder:
-            validity_days = lead.project.builder.leadRegistrationValidityDays
-            if validity_days:
-                lead.registrationExpiryDate = utcnow() + timedelta(days=validity_days)
+        validity_days = lead.project.builder.leadRegistrationValidityDays
+        lead.registrationExpiryDate = utcnow() + timedelta(days=validity_days)
 
 
 def _comment_payload(comment):
@@ -146,40 +176,78 @@ def _validate_assignee(assignee_id):
 
 EXTRA_LEAD_FIELD_KEYS = {
     'isCustLeadRegistered',
-    'registrationExpiryDate',
     'leadSourceId',
     'leadSourceDetail',
-    'nextFollowUpOn',
     'interestedConfigId',
 }
 
 
 def _apply_extra_lead_fields(lead, data):
     """Applies the fields both team members and admins may edit on a lead:
-    registration, lead source, next follow-up, interested configuration.
-    Returns an error string, or None on success."""
+    registration, lead source, interested configuration. Status changes go
+    through LeadStatusTransitionResource and follow-ups through
+    LeadFollowUpListResource — both require a mandatory comment and are not
+    part of this generic PATCH. Returns an error string, or None on success."""
     if 'leadSourceId' in data:
         if data['leadSourceId'] is not None and not LookupLeadSource.query.get(data['leadSourceId']):
             return 'invalid leadSourceId'
         lead.leadSourceId = data['leadSourceId']
     if 'leadSourceDetail' in data:
         lead.leadSourceDetail = (data.get('leadSourceDetail') or '').strip() or None
-    if 'nextFollowUpOn' in data:
-        lead.nextFollowUpOn = data['nextFollowUpOn'] or None
     if 'interestedConfigId' in data:
         config_id = data['interestedConfigId']
         if config_id is not None and not ProjectUnitConfiguration.query.get(config_id):
             return 'invalid interestedConfigId'
         lead.interestedConfigId = config_id or None
-    if 'isCustLeadRegistered' in data or 'registrationExpiryDate' in data:
-        is_registered = (
-            bool(data['isCustLeadRegistered'])
-            if 'isCustLeadRegistered' in data
-            else lead.isCustLeadRegistered
-        )
-        explicit_expiry = data['registrationExpiryDate'] if 'registrationExpiryDate' in data else '__unset__'
-        _apply_registration(lead, is_registered, explicit_expiry)
+    if 'isCustLeadRegistered' in data:
+        is_registered = bool(data['isCustLeadRegistered'])
+        if is_registered and not lead.isCustLeadRegistered:
+            block_reason = _registration_block_reason(lead)
+            if block_reason:
+                return block_reason
+        _apply_registration(lead, is_registered)
     return None
+
+
+def _filtered_lead_query(me, args):
+    """The base leads query shared by the paginated list and the
+    'select all filtered' id lookup — keeps both in lockstep."""
+    query = (
+        CustProject.query.join(CustLeadPrimary)
+        .outerjoin(BuilderProject)
+        .outerjoin(LookupLeadStatus)
+        .outerjoin(LookupLeadCategory)
+    )
+
+    if me.role == 'teamMember':
+        query = query.filter(CustProject.assignedToUserId == me.recordId)
+    elif args.get('assignedToUserId'):
+        query = query.filter(CustProject.assignedToUserId == int(args['assignedToUserId']))
+
+    if args.get('status'):
+        query = query.filter(CustProject.leadStatusId == int(args['status']))
+    if args.get('category'):
+        query = query.filter(CustProject.leadCategoryId == int(args['category']))
+    if args.get('builderId'):
+        query = query.filter(BuilderProject.builderRecordId == int(args['builderId']))
+    if args.get('projectId'):
+        query = query.filter(CustProject.projectId == int(args['projectId']))
+    if args.get('leadSourceId'):
+        query = query.filter(CustProject.leadSourceId == int(args['leadSourceId']))
+    if args.get('followUpDue', '').lower() == 'true':
+        query = query.filter(
+            CustProject.nextFollowUpOn.isnot(None), CustProject.nextFollowUpOn <= utcnow()
+        )
+    if args.get('search'):
+        like = f"%{args['search']}%"
+        query = query.filter(
+            db.or_(
+                CustLeadPrimary.leadName.ilike(like),
+                CustLeadPrimary.contactNumber.ilike(like),
+                CustLeadPrimary.leadLocation.ilike(like),
+            )
+        )
+    return query
 
 
 class LeadListResource(Resource):
@@ -187,41 +255,12 @@ class LeadListResource(Resource):
 
     def get(self):
         me = current_user()
-        query = (
-            CustProject.query.join(CustLeadPrimary)
-            .outerjoin(BuilderProject)
-            .outerjoin(LookupLeadStatus)
-            .outerjoin(LookupLeadCategory)
-        )
+        query = _filtered_lead_query(me, request.args)
 
-        if me.role == 'teamMember':
-            query = query.filter(CustProject.assignedToUserId == me.recordId)
-        elif request.args.get('assignedToUserId'):
-            query = query.filter(CustProject.assignedToUserId == int(request.args['assignedToUserId']))
-
-        if request.args.get('status'):
-            query = query.filter(CustProject.leadStatusId == int(request.args['status']))
-        if request.args.get('category'):
-            query = query.filter(CustProject.leadCategoryId == int(request.args['category']))
-        if request.args.get('builderId'):
-            query = query.filter(BuilderProject.builderRecordId == int(request.args['builderId']))
-        if request.args.get('projectId'):
-            query = query.filter(CustProject.projectId == int(request.args['projectId']))
-        if request.args.get('leadSourceId'):
-            query = query.filter(CustProject.leadSourceId == int(request.args['leadSourceId']))
-        if request.args.get('followUpDue', '').lower() == 'true':
-            query = query.filter(
-                CustProject.nextFollowUpOn.isnot(None), CustProject.nextFollowUpOn <= utcnow()
-            )
-        if request.args.get('search'):
-            like = f"%{request.args['search']}%"
-            query = query.filter(
-                db.or_(
-                    CustLeadPrimary.leadName.ilike(like),
-                    CustLeadPrimary.contactNumber.ilike(like),
-                    CustLeadPrimary.leadLocation.ilike(like),
-                )
-            )
+        # Powers "select all N filtered leads" in the UI — the same filters
+        # as the paginated list, but every matching id, unpaginated.
+        if request.args.get('idsOnly', '').lower() == 'true':
+            return {'ids': [row.recordId for row in query.with_entities(CustProject.recordId).all()]}
 
         sort_col = SORT_COLUMNS.get(request.args.get('sortBy'), CustProject.createdOn)
         query = query.order_by(
@@ -243,9 +282,21 @@ class LeadListResource(Resource):
     @role_required('admin')
     def post(self):
         data = request.get_json(silent=True) or {}
-        project_id = data.get('projectId')
-        if project_id and not BuilderProject.query.get(project_id):
-            return {'error': 'invalid projectId'}, 400
+
+        # A lead can be interested in more than one project (same or
+        # different builders) — projectIds creates one CustProject "pipeline"
+        # row per project, all against the same customer, in a single call.
+        # projectId (singular) is kept for backward compatibility.
+        project_ids = data.get('projectIds')
+        if project_ids is not None:
+            if not isinstance(project_ids, list) or not project_ids:
+                return {'error': 'projectIds must be a non-empty list'}, 400
+        else:
+            project_ids = [data.get('projectId')] if data.get('projectId') else [None]
+
+        for pid in project_ids:
+            if pid and not BuilderProject.query.get(pid):
+                return {'error': f'invalid projectId: {pid}'}, 400
 
         customer_id = data.get('customerId')
         customer_reused = False
@@ -282,20 +333,26 @@ class LeadListResource(Resource):
             default_status = LookupLeadStatus.query.filter_by(recordName='New').first()
             status_id = default_status.recordId if default_status else None
 
-        lead = CustProject(
-            customerId=customer.recordId,
-            projectId=project_id,
-            assignedToUserId=data.get('assignedToUserId'),
-            leadCategoryId=data.get('leadCategoryId'),
-            createdBy=current_user().recordId,
-        )
-        _apply_lead_status(lead, status_id)
-        extra_error = _apply_extra_lead_fields(lead, data)
-        if extra_error:
-            return {'error': extra_error}, 400
-        db.session.add(lead)
+        leads = []
+        for pid in project_ids:
+            lead = CustProject(
+                customerId=customer.recordId,
+                projectId=pid,
+                assignedToUserId=data.get('assignedToUserId'),
+                leadCategoryId=data.get('leadCategoryId'),
+                createdBy=current_user().recordId,
+            )
+            _apply_lead_status(lead, status_id)
+            extra_error = _apply_extra_lead_fields(lead, data)
+            if extra_error:
+                return {'error': extra_error}, 400
+            db.session.add(lead)
+            leads.append(lead)
+
         db.session.commit()
-        return {'lead': _lead_payload(lead), 'customerReused': customer_reused}, 201
+        if data.get('projectIds') is not None:
+            return {'leads': [_lead_payload(lead) for lead in leads], 'customerReused': customer_reused}, 201
+        return {'lead': _lead_payload(leads[0]), 'customerReused': customer_reused}, 201
 
 
 class LeadResource(Resource):
@@ -316,16 +373,13 @@ class LeadResource(Resource):
         data = request.get_json(silent=True) or {}
 
         if me.role == 'teamMember':
-            allowed_keys = {'leadStatusId', 'leadCategoryId'} | EXTRA_LEAD_FIELD_KEYS
+            allowed_keys = {'leadCategoryId'} | EXTRA_LEAD_FIELD_KEYS
             if not set(data.keys()) <= allowed_keys:
                 return {
-                    'error': 'team members may only update status/category/registration/'
-                    'source/follow-up/interested-configuration fields'
+                    'error': 'team members may only update category/registration/source/'
+                    'interested-configuration fields here — status changes go through '
+                    '/leads/<id>/status and follow-ups through /leads/<id>/follow-ups'
                 }, 403
-            if 'leadStatusId' in data and data['leadStatusId'] is not None:
-                if not LookupLeadStatus.query.get(data['leadStatusId']):
-                    return {'error': 'invalid leadStatusId'}, 400
-                _apply_lead_status(lead, data['leadStatusId'])
             if 'leadCategoryId' in data and data['leadCategoryId'] is not None:
                 if not LookupLeadCategory.query.get(data['leadCategoryId']):
                     return {'error': 'invalid leadCategoryId'}, 400
@@ -351,10 +405,6 @@ class LeadResource(Resource):
                 if assignee_error:
                     return {'error': assignee_error}, 400
                 lead.assignedToUserId = data['assignedToUserId']
-            if 'leadStatusId' in data and data['leadStatusId'] is not None:
-                if not LookupLeadStatus.query.get(data['leadStatusId']):
-                    return {'error': 'invalid leadStatusId'}, 400
-                _apply_lead_status(lead, data['leadStatusId'])
             if 'leadCategoryId' in data and data['leadCategoryId'] is not None:
                 if not LookupLeadCategory.query.get(data['leadCategoryId']):
                     return {'error': 'invalid leadCategoryId'}, 400
@@ -375,6 +425,53 @@ class LeadResource(Resource):
         db.session.delete(lead)
         db.session.commit()
         return {}, 204
+
+
+class LeadStatusTransitionResource(Resource):
+    """The only way to move a lead's status by hand — status/category can no
+    longer be set through the generic PATCH. Site Visit Scheduled and
+    Negotiation are set automatically elsewhere (site_visit_controller);
+    every transition here requires a mandatory comment, logged onto the
+    lead's comment thread so the reasoning behind each change is kept."""
+
+    method_decorators = [jwt_required()]
+
+    def post(self, lead_id):
+        me = current_user()
+        lead = _owned_lead_or_none(lead_id, me)
+        if not lead:
+            return {'error': 'lead not found'}, 404
+
+        data = request.get_json(silent=True) or {}
+        to_status_id = data.get('toStatusId')
+        comment_text = (data.get('comment') or '').strip()
+
+        if not to_status_id:
+            return {'error': 'toStatusId is required'}, 400
+        if not comment_text:
+            return {'error': 'a comment is required for every status change'}, 400
+
+        to_status = LookupLeadStatus.query.get(to_status_id)
+        if not to_status:
+            return {'error': 'invalid toStatusId'}, 400
+
+        from_status_name = lead.status.recordName if lead.status else None
+        allowed = MANUAL_STATUS_TRANSITIONS.get(from_status_name, [])
+        if to_status.recordName not in allowed:
+            return {
+                'error': f'cannot move a lead from "{from_status_name}" to "{to_status.recordName}"'
+            }, 400
+
+        _apply_lead_status(lead, to_status_id)
+        lead.modifiedBy = me.recordId
+        comment = LeadComment(
+            custProjectId=lead_id,
+            authorUserId=me.recordId,
+            commentText=f'Status changed to {to_status.recordName}: {comment_text}',
+        )
+        db.session.add(comment)
+        db.session.commit()
+        return {'lead': _lead_payload(lead), 'comment': _comment_payload(comment)}
 
 
 class LeadAssignResource(Resource):
@@ -399,6 +496,61 @@ class LeadAssignResource(Resource):
         db.session.commit()
 
         return {'updated': len(leads)}
+
+
+class LeadBulkStatusResource(Resource):
+    """Bulk status change over a multi-selected set of leads (e.g. every
+    lead matching the current filters). Each lead's current status is
+    checked against MANUAL_STATUS_TRANSITIONS individually — leads for
+    which the target isn't a legal transition are skipped and reported
+    rather than failing the whole batch. The mandatory comment is tagged
+    "BULK UPDATE" so it's obviously distinct from a one-off note in the
+    per-lead comment thread."""
+
+    method_decorators = [role_required('admin')]
+
+    def post(self):
+        me = current_user()
+        data = request.get_json(silent=True) or {}
+        lead_ids = data.get('leadIds') or []
+        to_status_id = data.get('toStatusId')
+        comment_text = (data.get('comment') or '').strip()
+
+        if not lead_ids:
+            return {'error': 'leadIds is required'}, 400
+        if not to_status_id:
+            return {'error': 'toStatusId is required'}, 400
+        if not comment_text:
+            return {'error': 'a comment is required for every status change'}, 400
+
+        to_status = LookupLeadStatus.query.get(to_status_id)
+        if not to_status:
+            return {'error': 'invalid toStatusId'}, 400
+
+        leads = CustProject.query.filter(CustProject.recordId.in_(lead_ids)).all()
+        updated = 0
+        skipped = []
+        for lead in leads:
+            from_status_name = lead.status.recordName if lead.status else None
+            allowed = MANUAL_STATUS_TRANSITIONS.get(from_status_name, [])
+            if to_status.recordName not in allowed:
+                skipped.append({
+                    'leadId': lead.recordId,
+                    'reason': f'cannot move from "{from_status_name}" to "{to_status.recordName}"',
+                })
+                continue
+
+            _apply_lead_status(lead, to_status_id)
+            lead.modifiedBy = me.recordId
+            db.session.add(LeadComment(
+                custProjectId=lead.recordId,
+                authorUserId=me.recordId,
+                commentText=f'BULK UPDATE: Status changed to {to_status.recordName}: {comment_text}',
+            ))
+            updated += 1
+
+        db.session.commit()
+        return {'updated': updated, 'skipped': skipped}
 
 
 class LeadCommentListResource(Resource):
@@ -427,3 +579,50 @@ class LeadCommentListResource(Resource):
         db.session.add(comment)
         db.session.commit()
         return {'comment': _comment_payload(comment)}, 201
+
+
+def _follow_up_payload(f):
+    return {
+        'recordId': f.recordId,
+        'followUpOn': f.followUpOn.isoformat() if f.followUpOn else None,
+        'comment': f.comment,
+        'authorUsername': f.author.username if f.author else None,
+        'createdOn': f.createdOn.isoformat() if f.createdOn else None,
+    }
+
+
+class LeadFollowUpListResource(Resource):
+    """Logs a follow-up ('retouch') on a lead. Append-only and immutable —
+    each entry needs its own comment, and the full history is kept rather
+    than overwriting a single next-follow-up field."""
+
+    method_decorators = [jwt_required()]
+
+    def get(self, lead_id):
+        lead = _owned_lead_or_none(lead_id, current_user())
+        if not lead:
+            return {'error': 'lead not found'}, 404
+        return {'items': [_follow_up_payload(f) for f in lead.followUps]}
+
+    def post(self, lead_id):
+        me = current_user()
+        lead = _owned_lead_or_none(lead_id, me)
+        if not lead:
+            return {'error': 'lead not found'}, 404
+
+        data = request.get_json(silent=True) or {}
+        follow_up_on = data.get('followUpOn')
+        comment_text = (data.get('comment') or '').strip()
+        if not follow_up_on:
+            return {'error': 'followUpOn is required'}, 400
+        if not comment_text:
+            return {'error': 'a comment is required for every follow-up'}, 400
+
+        follow_up = LeadFollowUp(
+            custProjectId=lead_id, followUpOn=follow_up_on, comment=comment_text, createdBy=me.recordId,
+        )
+        db.session.add(follow_up)
+        lead.nextFollowUpOn = follow_up_on
+        lead.modifiedBy = me.recordId
+        db.session.commit()
+        return {'followUp': _follow_up_payload(follow_up), 'lead': _lead_payload(lead)}, 201

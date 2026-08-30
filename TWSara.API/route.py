@@ -21,12 +21,16 @@ from controllers.builder_controller import (
     ProjectManagerListResource,
     ProjectManagerResource,
     ProjectResource,
+    ProjectSearchResource,
 )
 from controllers.lead_controller import (
     LeadAssignResource,
+    LeadBulkStatusResource,
     LeadCommentListResource,
+    LeadFollowUpListResource,
     LeadListResource,
     LeadResource,
+    LeadStatusTransitionResource,
 )
 from controllers.lead_suggestion_controller import (
     LeadSuggestionApproveResource,
@@ -50,7 +54,11 @@ from controllers.lookup_controller import (
 )
 from controllers.misc_controller import HomeResource, PublicStatsResource
 from controllers.report_controller import LeadExportResource, LeadImportResource
-from controllers.site_visit_controller import SiteVisitListResource, SiteVisitResource
+from controllers.site_visit_controller import (
+    SiteVisitListResource,
+    SiteVisitRescheduleResource,
+    SiteVisitResource,
+)
 from controllers.team_controller import (
     TeamMemberLeadsResource,
     TeamMemberListResource,
@@ -80,6 +88,7 @@ def register_routes(app):
     api.add_resource(BuilderListResource, '/api/builders')
     api.add_resource(BuilderResource, '/api/builders/<int:builder_id>')
     api.add_resource(BuilderProjectListResource, '/api/builders/<int:builder_id>/projects')
+    api.add_resource(ProjectSearchResource, '/api/projects/search')
     api.add_resource(ProjectResource, '/api/projects/<int:project_id>')
     api.add_resource(ProjectManagerListResource, '/api/projects/<int:project_id>/managers')
     api.add_resource(ProjectManagerResource, '/api/project-managers/<int:manager_id>')
@@ -89,11 +98,15 @@ def register_routes(app):
     api.add_resource(LeadListResource, '/api/leads')
     api.add_resource(LeadResource, '/api/leads/<int:lead_id>')
     api.add_resource(LeadAssignResource, '/api/leads/assign')
+    api.add_resource(LeadBulkStatusResource, '/api/leads/bulk-status')
+    api.add_resource(LeadStatusTransitionResource, '/api/leads/<int:lead_id>/status')
     api.add_resource(LeadCommentListResource, '/api/leads/<int:lead_id>/comments')
+    api.add_resource(LeadFollowUpListResource, '/api/leads/<int:lead_id>/follow-ups')
     api.add_resource(LeadImportResource, '/api/leads/import')
     api.add_resource(LeadExportResource, '/api/leads/export')
     api.add_resource(SiteVisitListResource, '/api/leads/<int:lead_id>/site-visits')
     api.add_resource(SiteVisitResource, '/api/site-visits/<int:visit_id>')
+    api.add_resource(SiteVisitRescheduleResource, '/api/site-visits/<int:visit_id>/reschedule')
 
     api.add_resource(LeadSuggestionListResource, '/api/lead-suggestions')
     api.add_resource(LeadSuggestionApproveResource, '/api/lead-suggestions/<int:suggestion_id>/approve')

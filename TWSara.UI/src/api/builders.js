@@ -21,6 +21,12 @@ export const createProject = (builderId, payload) =>
 export const getProject = (projectId) =>
   api.get(`/projects/${projectId}`).then((r) => r.data.project)
 
+// Cross-builder project search — filters: search, location, builderId,
+// propertyTypeId, saleTypeId, listingTypeId, lookupProjectStatusRecordId,
+// minPrice, maxPrice, page, pageSize.
+export const searchProjects = (params = {}) =>
+  api.get('/projects/search', { params }).then((r) => r.data)
+
 export const updateProject = (projectId, patch) =>
   api.patch(`/projects/${projectId}`, patch).then((r) => r.data.project)
 

@@ -2,6 +2,11 @@ import api from '@/lib/api'
 
 export const listLeads = (params = {}) => api.get('/leads', { params }).then((r) => r.data)
 
+// Every lead id matching the current filters, unpaginated — powers "select
+// all N filtered leads" without fetching full lead payloads for each one.
+export const listLeadIds = (params = {}) =>
+  api.get('/leads', { params: { ...params, idsOnly: true } }).then((r) => r.data.ids)
+
 export const getLead = (leadId) => api.get(`/leads/${leadId}`).then((r) => r.data.lead)
 
 // Returns the full response ({ lead, customerReused }) — customerReused lets
@@ -13,8 +18,21 @@ export const updateLead = (leadId, patch) =>
 
 export const deleteLead = (leadId) => api.delete(`/leads/${leadId}`)
 
+// The only way to change a lead's status — a mandatory comment is logged
+// alongside the change. Site Visit Scheduled/Negotiation are set
+// automatically by the API and can't be requested here.
+export const changeLeadStatus = (leadId, toStatusId, comment) =>
+  api.post(`/leads/${leadId}/status`, { toStatusId, comment }).then((r) => r.data.lead)
+
 export const assignLeads = (leadIds, userId) =>
   api.post('/leads/assign', { leadIds, userId }).then((r) => r.data)
+
+// Bulk status change over a multi-selected set of leads — comment is
+// mandatory and gets tagged "BULK UPDATE" server-side. Leads whose current
+// status doesn't legally allow this transition are skipped, not failed;
+// the response reports both counts.
+export const bulkChangeLeadStatus = (leadIds, toStatusId, comment) =>
+  api.post('/leads/bulk-status', { leadIds, toStatusId, comment }).then((r) => r.data)
 
 export const listComments = (leadId) =>
   api.get(`/leads/${leadId}/comments`).then((r) => r.data.items)

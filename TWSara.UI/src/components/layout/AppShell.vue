@@ -15,6 +15,7 @@ const navItems = [
   { to: '/suggestions', label: 'Suggestions', adminOnly: false },
   { to: '/transfers', label: 'Transfers', adminOnly: false },
   { to: '/builders', label: 'Builders', adminOnly: false },
+  { to: '/project-search', label: 'Find Projects', adminOnly: false },
   { to: '/team-members', label: 'Team', adminOnly: true },
 ]
 

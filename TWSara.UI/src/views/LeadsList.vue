@@ -6,11 +6,25 @@ import DataTable from '@/components/ui/DataTable.vue'
 import Modal from '@/components/ui/Modal.vue'
 import Badge from '@/components/ui/Badge.vue'
 import { useAuth } from '@/stores/auth'
-import { listLeads, createLead, assignLeads, importLeadsCsv, downloadLeadsCsv } from '@/api/leads'
+import {
+  listLeads, listLeadIds, createLead, assignLeads, bulkChangeLeadStatus, importLeadsCsv, downloadLeadsCsv,
+} from '@/api/leads'
 import { listBuilders, listProjects } from '@/api/builders'
 import { listTeamMembers } from '@/api/teamMembers'
 import { getLeadStatuses, getLeadCategories, getLeadSources } from '@/api/lookups'
 import { statusColor, categoryColor } from '@/lib/badges'
+
+// Mirrors the backend's MANUAL_STATUS_TRANSITIONS (lead_controller.py) —
+// used to offer only statuses that are a legal manual target from at least
+// one status; per-lead eligibility is still enforced server-side, since a
+// bulk selection can span leads sitting at different current statuses.
+const MANUAL_STATUS_TRANSITIONS = {
+  New: ['Contacted'],
+  Contacted: ['Lost', 'On Hold'],
+  'Site Visit Scheduled': ['Lost', 'On Hold'],
+  Negotiation: ['Converted', 'On Hold', 'Lost'],
+}
+const BULK_TARGET_STATUS_NAMES = [...new Set(Object.values(MANUAL_STATUS_TRANSITIONS).flat())]
 
 const { role } = useAuth()
 const router = useRouter()
@@ -41,13 +55,25 @@ const pageSize = 20
 const selectedIds = ref(new Set())
 const bulkAssignTo = ref('')
 const bulkAssigning = ref(false)
+const selectingAll = ref(false)
+
+const bulkTargetStatuses = computed(() => statuses.value.filter((s) => BULK_TARGET_STATUS_NAMES.includes(s.recordName)))
+const bulkStatusTargetId = ref('')
+const bulkStatusComment = ref('')
+const bulkStatusApplying = ref(false)
+const bulkStatusResult = ref(null)
+const bulkStatusError = ref('')
 
 const showCreateModal = ref(false)
 const createForm = ref({
-  leadName: '', contactNumber: '', alternateNumber: '', leadLocation: '',
-  builderId: '', projectId: '', assignedToUserId: '',
+  leadName: '', contactNumber: '', alternateNumber: '', leadLocation: '', assignedToUserId: '',
 })
-const createProjects = ref([])
+// A lead can be interested in more than one project (same or different
+// builders) — picked one at a time here, then added to selectedProjects.
+const pickBuilderId = ref('')
+const pickProjectId = ref('')
+const pickProjectOptions = ref([])
+const selectedProjects = ref([])
 const creating = ref(false)
 const createError = ref('')
 const createNotice = ref('')
@@ -136,10 +162,72 @@ async function onBulkAssign() {
   }
 }
 
-watch(() => createForm.value.builderId, async (builderIdValue) => {
-  createForm.value.projectId = ''
-  createProjects.value = builderIdValue ? await listProjects(builderIdValue) : []
+// Selects every lead matching the current filters, not just the current
+// page — e.g. the admin filtered down to a set of leads and wants to act
+// on all of them at once.
+async function selectAllFiltered() {
+  selectingAll.value = true
+  try {
+    const ids = await listLeadIds(currentFilterParams())
+    selectedIds.value = new Set(ids)
+  } finally {
+    selectingAll.value = false
+  }
+}
+
+async function onBulkChangeStatus() {
+  bulkStatusError.value = ''
+  bulkStatusResult.value = null
+  if (!bulkStatusTargetId.value || !bulkStatusComment.value.trim()) {
+    bulkStatusError.value = 'Choose a target status and add a comment.'
+    return
+  }
+  bulkStatusApplying.value = true
+  try {
+    const result = await bulkChangeLeadStatus(
+      Array.from(selectedIds.value), Number(bulkStatusTargetId.value), bulkStatusComment.value.trim()
+    )
+    bulkStatusResult.value = result
+    bulkStatusTargetId.value = ''
+    bulkStatusComment.value = ''
+    await loadLeads()
+  } catch (err) {
+    bulkStatusError.value = err.response?.data?.error || 'Could not change status.'
+  } finally {
+    bulkStatusApplying.value = false
+  }
+}
+
+watch(pickBuilderId, async (builderIdValue) => {
+  pickProjectId.value = ''
+  pickProjectOptions.value = builderIdValue ? await listProjects(builderIdValue) : []
 })
+
+function addSelectedProject() {
+  if (!pickProjectId.value) return
+  const projectId = Number(pickProjectId.value)
+  if (selectedProjects.value.some((p) => p.projectId === projectId)) return
+  const project = pickProjectOptions.value.find((p) => p.recordId === projectId)
+  const builder = builders.value.find((b) => b.recordId === Number(pickBuilderId.value))
+  selectedProjects.value.push({
+    projectId, projectName: project?.projectName, builderName: builder?.builderName,
+  })
+  pickProjectId.value = ''
+  pickProjectOptions.value = []
+  pickBuilderId.value = ''
+}
+
+function removeSelectedProject(projectId) {
+  selectedProjects.value = selectedProjects.value.filter((p) => p.projectId !== projectId)
+}
+
+function resetCreateForm() {
+  createForm.value = { leadName: '', contactNumber: '', alternateNumber: '', leadLocation: '', assignedToUserId: '' }
+  selectedProjects.value = []
+  pickBuilderId.value = ''
+  pickProjectId.value = ''
+  pickProjectOptions.value = []
+}
 
 async function onCreateLead() {
   createError.value = ''
@@ -150,19 +238,24 @@ async function onCreateLead() {
   }
   creating.value = true
   try {
-    const result = await createLead({
+    const payload = {
       leadName: f.leadName.trim(),
       contactNumber: f.contactNumber.trim(),
       alternateNumber: f.alternateNumber.trim() || undefined,
       leadLocation: f.leadLocation.trim() || undefined,
-      projectId: f.projectId ? Number(f.projectId) : undefined,
       assignedToUserId: f.assignedToUserId ? Number(f.assignedToUserId) : undefined,
-    })
+    }
+    if (selectedProjects.value.length) {
+      payload.projectIds = selectedProjects.value.map((p) => p.projectId)
+    }
+    const result = await createLead(payload)
+    const createdCount = result.leads ? result.leads.length : 1
     showCreateModal.value = false
-    createForm.value = { leadName: '', contactNumber: '', alternateNumber: '', leadLocation: '', builderId: '', projectId: '', assignedToUserId: '' }
-    createNotice.value = result.customerReused
-      ? 'This contact already had other lead(s) — a new project lead was added for them.'
-      : ''
+    resetCreateForm()
+    const notices = []
+    if (result.customerReused) notices.push('this contact already had other lead(s)')
+    if (createdCount > 1) notices.push(`${createdCount} project leads were created for them`)
+    createNotice.value = notices.length ? `Note: ${notices.join(' — ')}.` : ''
     await loadLeads()
   } catch (err) {
     createError.value = err.response?.data?.error || 'Could not create lead.'
@@ -301,19 +394,66 @@ onMounted(async () => {
       </button>
     </div>
 
-    <div v-if="isAdmin && selectedIds.size" class="mb-4 px-4 py-3 rounded-md bg-brand-50 border border-brand-200 flex items-center gap-3">
-      <span class="text-sm text-brand-800 font-medium">{{ selectedIds.size }} selected</span>
-      <select v-model="bulkAssignTo" class="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
-        <option value="">Assign to…</option>
-        <option v-for="m in teamMembers" :key="m.recordId" :value="m.recordId">{{ m.username }}</option>
-      </select>
+    <div v-if="isAdmin && leads.length" class="mb-4 flex items-center gap-3 text-sm">
       <button
-        @click="onBulkAssign"
-        :disabled="!bulkAssignTo || bulkAssigning"
-        class="px-3 py-1.5 rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold"
+        v-if="selectedIds.size < total"
+        @click="selectAllFiltered"
+        :disabled="selectingAll"
+        class="text-brand-600 hover:text-brand-700 font-medium disabled:opacity-60"
       >
-        {{ bulkAssigning ? 'Assigning…' : 'Assign' }}
+        {{ selectingAll ? 'Selecting…' : `Select all ${total} filtered lead(s)` }}
       </button>
+      <button v-if="selectedIds.size" @click="selectedIds = new Set()" class="text-slate-500 hover:text-slate-700 font-medium">
+        Clear selection
+      </button>
+    </div>
+
+    <div v-if="isAdmin && selectedIds.size" class="mb-4 p-4 rounded-md bg-brand-50 border border-brand-200 space-y-3">
+      <span class="text-sm text-brand-800 font-medium">{{ selectedIds.size }} lead(s) selected</span>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <select v-model="bulkAssignTo" class="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+          <option value="">Assign to…</option>
+          <option v-for="m in teamMembers" :key="m.recordId" :value="m.recordId">{{ m.username }}</option>
+        </select>
+        <button
+          @click="onBulkAssign"
+          :disabled="!bulkAssignTo || bulkAssigning"
+          class="px-3 py-1.5 rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold"
+        >
+          {{ bulkAssigning ? 'Assigning…' : 'Assign' }}
+        </button>
+      </div>
+
+      <div class="flex flex-wrap items-end gap-3 pt-3 border-t border-brand-100">
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Change status to</label>
+          <select v-model="bulkStatusTargetId" class="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+            <option value="">Select status…</option>
+            <option v-for="s in bulkTargetStatuses" :key="s.recordId" :value="s.recordId">{{ s.recordName }}</option>
+          </select>
+        </div>
+        <input
+          v-model="bulkStatusComment" type="text" placeholder="Comment (required)"
+          class="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 flex-1 min-w-[12rem]"
+        />
+        <button
+          @click="onBulkChangeStatus"
+          :disabled="!bulkStatusTargetId || !bulkStatusComment.trim() || bulkStatusApplying"
+          class="px-3 py-1.5 rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold"
+        >
+          {{ bulkStatusApplying ? 'Applying…' : 'Apply' }}
+        </button>
+      </div>
+      <p class="text-xs text-slate-500">
+        Only leads whose current status legally allows the chosen change will be updated; others are skipped. The comment is
+        tagged "BULK UPDATE" in each lead's history.
+      </p>
+      <p v-if="bulkStatusError" class="text-sm text-rose-600">{{ bulkStatusError }}</p>
+      <p v-if="bulkStatusResult" class="text-sm text-emerald-700">
+        {{ bulkStatusResult.updated }} lead(s) updated.
+        <span v-if="bulkStatusResult.skipped.length">{{ bulkStatusResult.skipped.length }} skipped (ineligible current status).</span>
+      </p>
     </div>
 
     <DataTable
@@ -399,19 +539,34 @@ onMounted(async () => {
           <label class="block text-sm font-medium text-slate-600 mb-1">Location</label>
           <input v-model="createForm.leadLocation" type="text" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
         </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-600 mb-1">Builder</label>
-          <select v-model="createForm.builderId" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
-            <option value="">Select builder</option>
-            <option v-for="b in builders" :key="b.recordId" :value="b.recordId">{{ b.builderName }}</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-600 mb-1">Project</label>
-          <select v-model="createForm.projectId" :disabled="!createForm.builderId" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 disabled:bg-slate-50">
-            <option value="">Select project</option>
-            <option v-for="p in createProjects" :key="p.recordId" :value="p.recordId">{{ p.projectName }}</option>
-          </select>
+        <div class="col-span-2">
+          <label class="block text-sm font-medium text-slate-600 mb-1">
+            Interested project(s) <span class="font-normal text-slate-400">(optional, can add more than one)</span>
+          </label>
+          <div class="flex gap-2">
+            <select v-model="pickBuilderId" class="flex-1 px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+              <option value="">Select builder</option>
+              <option v-for="b in builders" :key="b.recordId" :value="b.recordId">{{ b.builderName }}</option>
+            </select>
+            <select v-model="pickProjectId" :disabled="!pickBuilderId" class="flex-1 px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 disabled:bg-slate-50">
+              <option value="">Select project</option>
+              <option v-for="p in pickProjectOptions" :key="p.recordId" :value="p.recordId">{{ p.projectName }}</option>
+            </select>
+            <button type="button" @click="addSelectedProject" :disabled="!pickProjectId" class="px-3 py-2 rounded-md bg-ink-900 hover:bg-ink-800 disabled:opacity-40 text-white text-sm font-medium">
+              Add
+            </button>
+          </div>
+          <ul v-if="selectedProjects.length" class="mt-2 space-y-1">
+            <li
+              v-for="p in selectedProjects" :key="p.projectId"
+              class="flex items-center justify-between text-sm px-3 py-1.5 rounded-md bg-slate-50 border border-slate-200"
+            >
+              <span>{{ p.projectName }} — {{ p.builderName }}</span>
+              <button type="button" @click="removeSelectedProject(p.projectId)" class="text-rose-600 hover:text-rose-700 text-xs font-medium">
+                Remove
+              </button>
+            </li>
+          </ul>
         </div>
         <div class="col-span-2">
           <label class="block text-sm font-medium text-slate-600 mb-1">Assign to</label>

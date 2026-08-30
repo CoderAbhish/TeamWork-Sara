@@ -282,11 +282,25 @@ class CustProject(db.Model):
     category = db.relationship('LookupLeadCategory')
     source = db.relationship('LookupLeadSource')
     interestedConfig = db.relationship('ProjectUnitConfiguration')
+    # cascade='all, delete-orphan' on every child log below: these rows are
+    # only meaningful attached to their lead (comments, visits, follow-ups,
+    # transfer requests), so deleting a lead must take them with it instead
+    # of tripping their NOT NULL custProjectId FK.
     comments = db.relationship(
-        'LeadComment', back_populates='lead', order_by='LeadComment.createdOn.desc()'
+        'LeadComment', back_populates='lead', order_by='LeadComment.createdOn.desc()',
+        cascade='all, delete-orphan',
     )
     siteVisits = db.relationship(
-        'SiteVisit', back_populates='lead', order_by='SiteVisit.scheduledOn.desc()'
+        'SiteVisit', back_populates='lead', order_by='SiteVisit.scheduledOn.desc()',
+        cascade='all, delete-orphan',
+    )
+    followUps = db.relationship(
+        'LeadFollowUp', back_populates='lead', order_by='LeadFollowUp.createdOn.desc()',
+        cascade='all, delete-orphan',
+    )
+    transferRequests = db.relationship(
+        'LeadTransferRequest', back_populates='lead', order_by='LeadTransferRequest.requestedOn.desc()',
+        cascade='all, delete-orphan',
     )
 
 
@@ -303,6 +317,26 @@ class LeadComment(db.Model):
 
     lead = db.relationship('CustProject', back_populates='comments')
     author = db.relationship('UserSara', back_populates='comments')
+
+
+class LeadFollowUp(db.Model):
+    """A logged follow-up ('retouch') on a lead. Append-only, with a
+    mandatory comment each time, so the full contact history is preserved
+    rather than silently overwriting a single 'next follow-up' field."""
+
+    __tablename__ = 'lead_follow_up'
+
+    recordId = db.Column(db.Integer, primary_key=True)
+    custProjectId = db.Column(
+        db.Integer, db.ForeignKey('cust_project.recordId'), nullable=False, index=True
+    )
+    followUpOn = db.Column(db.DateTime(timezone=True), nullable=False)
+    comment = db.Column(db.Text, nullable=False)
+    createdOn = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    createdBy = db.Column(db.Integer, db.ForeignKey('user_sara.recordId'))
+
+    lead = db.relationship('CustProject', back_populates='followUps')
+    author = db.relationship('UserSara')
 
 
 class LeadSuggestion(db.Model):
@@ -352,7 +386,7 @@ class LeadTransferRequest(db.Model):
     reviewedOn = db.Column(db.DateTime(timezone=True))
     reviewComment = db.Column(db.Text)
 
-    lead = db.relationship('CustProject')
+    lead = db.relationship('CustProject', back_populates='transferRequests')
     fromUser = db.relationship('UserSara', foreign_keys=[fromUserId])
     toUser = db.relationship('UserSara', foreign_keys=[toUserId])
     reviewedBy = db.relationship('UserSara', foreign_keys=[reviewedByUserId])

@@ -53,11 +53,22 @@ def _configuration_payload(config):
     }
 
 
+def _project_price_range(project):
+    prices = [c.startingPriceAmount for c in project.configurations if c.startingPriceAmount is not None]
+    if not prices:
+        return None, None
+    return float(min(prices)), float(max(prices))
+
+
 def _project_payload(project):
+    min_price, max_price = _project_price_range(project)
     return {
         'recordId': project.recordId,
         'builderRecordId': project.builderRecordId,
+        'builderName': project.builder.builderName if project.builder else None,
         'projectName': project.projectName,
+        'minStartingPrice': min_price,
+        'maxStartingPrice': max_price,
         'lookupProjectStatusRecordId': project.lookupProjectStatusRecordId,
         'statusName': project.status.recordName if project.status else None,
         'startDate': project.startDate.isoformat() if project.startDate else None,
@@ -230,6 +241,59 @@ class BuilderProjectListResource(Resource):
         db.session.add(project)
         db.session.commit()
         return {'project': _project_payload(project)}, 201
+
+
+class ProjectSearchResource(Resource):
+    """Cross-builder project search — available to admins and team members
+    alike, so anyone can find a matching project regardless of who owns it."""
+
+    method_decorators = [jwt_required()]
+
+    def get(self):
+        query = BuilderProject.query.join(BuilderPrimary)
+
+        if request.args.get('search'):
+            like = f"%{request.args['search']}%"
+            query = query.filter(
+                db.or_(BuilderProject.projectName.ilike(like), BuilderPrimary.builderName.ilike(like))
+            )
+        if request.args.get('location'):
+            query = query.filter(BuilderProject.location.ilike(f"%{request.args['location']}%"))
+        if request.args.get('builderId'):
+            query = query.filter(BuilderProject.builderRecordId == int(request.args['builderId']))
+        if request.args.get('propertyTypeId'):
+            query = query.filter(BuilderProject.propertyTypeId == int(request.args['propertyTypeId']))
+        if request.args.get('saleTypeId'):
+            query = query.filter(BuilderProject.saleTypeId == int(request.args['saleTypeId']))
+        if request.args.get('listingTypeId'):
+            query = query.filter(BuilderProject.listingTypeId == int(request.args['listingTypeId']))
+        if request.args.get('lookupProjectStatusRecordId'):
+            query = query.filter(
+                BuilderProject.lookupProjectStatusRecordId == int(request.args['lookupProjectStatusRecordId'])
+            )
+
+        min_price = request.args.get('minPrice')
+        max_price = request.args.get('maxPrice')
+        if min_price or max_price:
+            query = query.join(ProjectUnitConfiguration)
+            if min_price:
+                query = query.filter(ProjectUnitConfiguration.startingPriceAmount >= float(min_price))
+            if max_price:
+                query = query.filter(ProjectUnitConfiguration.startingPriceAmount <= float(max_price))
+            query = query.distinct()
+
+        page = max(int(request.args.get('page', 1)), 1)
+        page_size = min(max(int(request.args.get('pageSize', 20)), 1), 100)
+        query = query.order_by(BuilderProject.projectName)
+        total = query.count()
+        items = query.offset((page - 1) * page_size).limit(page_size).all()
+
+        return {
+            'items': [_project_payload(p) for p in items],
+            'total': total,
+            'page': page,
+            'pageSize': page_size,
+        }
 
 
 class ProjectResource(Resource):
